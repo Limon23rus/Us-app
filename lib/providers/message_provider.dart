@@ -110,7 +110,7 @@ class MessageProvider extends ChangeNotifier {
 
     try {
       final page = _page[chatId] ?? 0;
-      final limit = 50;
+      final limit = 1000;
       final offset = page * limit;
 
       final messages = await authProvider.apiService!.getMessages(
@@ -120,15 +120,18 @@ class MessageProvider extends ChangeNotifier {
       );
 
       if (refresh) {
+        // При первой загрузке: загружаем последние 1000 сообщений
         _messages[chatId] = messages.reversed.toList();
       } else {
+        // При подгрузке старых сообщений: добавляем в начало списка
         final existing = _messages[chatId] ?? [];
-        // Объединяем, избегая дубликатов
         final existingIds = existing.map((m) => m.id).toSet();
         final newMessages = messages.reversed.where((m) => !existingIds.contains(m.id)).toList();
+        // Старые сообщения добавляем в начало
         _messages[chatId] = [...newMessages, ...existing];
       }
 
+      // Если получили меньше сообщений, чем запросили, значит больше нет
       _hasMore[chatId] = messages.length == limit;
       _page[chatId] = (page + 1);
     } catch (e) {
@@ -137,6 +140,12 @@ class MessageProvider extends ChangeNotifier {
 
     _isLoading[chatId] = false;
     notifyListeners();
+  }
+
+  // Метод для загрузки старых сообщений (при прокрутке вверх)
+  Future<void> loadMoreMessages(int chatId) async {
+    if (_isLoading[chatId] == true || !hasMore(chatId)) return;
+    await loadMessages(chatId, refresh: false);
   }
 
   Future<Message?> sendMessage({

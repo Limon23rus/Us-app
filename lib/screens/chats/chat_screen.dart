@@ -27,10 +27,40 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    // Добавляем слушатель прокрутки для подгрузки старых сообщений
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadMessages();
       _joinChat();
     });
+  }
+
+  void _onScroll() {
+    // Если прокрутили близко к началу (верх списка), загружаем старые сообщения
+    if (_scrollController.hasClients) {
+      final position = _scrollController.position;
+      // Если прокрутили вверх (близко к началу списка)
+      if (position.pixels < 300 && position.pixels >= 0) {
+        final messageProvider = Provider.of<MessageProvider>(context, listen: false);
+        if (messageProvider.hasMore(widget.chat.id) && 
+            !messageProvider.isLoading(widget.chat.id)) {
+          // Сохраняем текущую позицию прокрутки
+          final currentScrollPosition = position.pixels;
+          final currentMaxScroll = position.maxScrollExtent;
+          
+          messageProvider.loadMoreMessages(widget.chat.id).then((_) {
+            // После загрузки восстанавливаем позицию
+            if (_scrollController.hasClients) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final newMaxScroll = _scrollController.position.maxScrollExtent;
+                final scrollDifference = newMaxScroll - currentMaxScroll;
+                _scrollController.jumpTo(currentScrollPosition + scrollDifference);
+              });
+            }
+          });
+        }
+      }
+    }
   }
 
   @override
@@ -189,17 +219,36 @@ class _ChatScreenState extends State<ChatScreen> {
                 
                 return ListView.builder(
                   controller: _scrollController,
+                  reverse: false, // Сообщения от старых к новым (сверху вниз)
                   padding: const EdgeInsets.all(16),
-                  itemCount: messages.length + (isTyping ? 1 : 0),
+                  itemCount: messages.length + 
+                            (messageProvider.isLoading(widget.chat.id) ? 1 : 0) + 
+                            (isTyping ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (isTyping && index == messages.length) {
+                    // Индикатор загрузки старых сообщений (в начале списка)
+                    if (messageProvider.isLoading(widget.chat.id) && index == 0) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    
+                    // Индекс сообщения (учитываем индикатор загрузки)
+                    final messageIndex = messageProvider.isLoading(widget.chat.id) ? index - 1 : index;
+                    
+                    // Индикатор печати (в конце списка)
+                    if (isTyping && messageIndex == messages.length) {
                       return const TypingIndicator();
                     }
 
-                    final message = messages[index];
+                    if (messageIndex < 0 || messageIndex >= messages.length) {
+                      return const SizedBox.shrink();
+                    }
+
+                    final message = messages[messageIndex];
                     final isMe = message.sender.id == currentUser.id;
-                    final showAvatar = index == 0 ||
-                        messages[index - 1].sender.id != message.sender.id;
+                    final showAvatar = messageIndex == 0 ||
+                        messages[messageIndex - 1].sender.id != message.sender.id;
 
                     return MessageBubble(
                       message: message,
