@@ -1,0 +1,52 @@
+name: messenger_app
+description: Flutter мессенджер приложение с real-time сообщениями
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # HTTP & WebSocket
+  http: ^1.1.0
+  socket_io_client: ^2.0.3+1
+  
+  # Storage
+  shared_preferences: ^2.2.2
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  cached_network_image: ^3.3.0
+  image_picker: ^1.0.5
+  file_picker: ^8.3.7
+  
+  # Utils
+  intl: ^0.18.1
+  uuid: ^4.2.1
+  path_provider: ^2.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "lib/assets/logo.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+
