@@ -34,16 +34,34 @@ class Chat {
 
   factory Chat.fromJson(Map<String, dynamic> json) {
     try {
+      // Безопасное преобразование int
+      int _parseInt(dynamic value, int defaultValue) {
+        if (value == null) return defaultValue;
+        if (value is int) return value;
+        if (value is String) {
+          return int.tryParse(value) ?? defaultValue;
+        }
+        if (value is double) return value.toInt();
+        return defaultValue;
+      }
+
+      // Безопасное преобразование String?
+      String? _parseString(dynamic value) {
+        if (value == null) return null;
+        if (value is String) return value.isEmpty ? null : value;
+        return value.toString();
+      }
+
       return Chat(
-        id: (json['id'] ?? 0) as int,
+        id: _parseInt(json['id'], 0),
         type: json['type'] != null
             ? ChatType.values.firstWhere(
                 (e) => e.toString().split('.').last == json['type'].toString(),
                 orElse: () => ChatType.private,
               )
             : ChatType.private,
-        name: json['name'] as String?,
-        avatar: json['avatar'] as String?,
+        name: _parseString(json['name']),
+        avatar: _parseString(json['avatar']),
         participants: (() {
           try {
             final participantsData = json['participants'];
@@ -72,6 +90,7 @@ class Chat {
                     return null;
                   }
                 } catch (e) {
+                  print('Error parsing participant: $e');
                   return null;
                 }
               }).whereType<User>().toList();
@@ -81,32 +100,55 @@ class Chat {
               return <User>[];
             }
           } catch (e) {
+            print('Error parsing participants: $e');
             return <User>[];
           }
         })(),
-        lastMessageSender: json['lastMessageSender'] != null
+        lastMessageSender: json['lastMessageSender'] != null || json['last_message_sender'] != null
             ? (() {
                 try {
-                  return User.fromJson(
-                      json['lastMessageSender'] as Map<String, dynamic>);
+                  final senderData = json['lastMessageSender'] ?? json['last_message_sender'];
+                  if (senderData is Map<String, dynamic>) {
+                    return User.fromJson(senderData);
+                  }
+                  return null;
                 } catch (e) {
+                  print('Error parsing lastMessageSender: $e');
                   return null;
                 }
               })()
             : null,
-        lastMessage: json['lastMessage'] as String?,
-        lastMessageAt: json['lastMessageAt'] != null
-            ? DateTime.tryParse(json['lastMessageAt'] as String)
-            : null,
-        unreadCount: (json['unreadCount'] ?? 0) as int,
-        createdAt: json['createdAt'] != null
-            ? (DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now())
-            : DateTime.now(),
-        updatedAt: json['updatedAt'] != null
-            ? (DateTime.tryParse(json['updatedAt'] as String) ?? DateTime.now())
-            : DateTime.now(),
+        lastMessage: _parseString(json['lastMessage'] ?? json['last_message']),
+        lastMessageAt: (() {
+          final lastMessageAtStr = json['lastMessageAt'] ?? json['last_message_time'] ?? json['last_message_at'];
+          if (lastMessageAtStr == null) return null;
+          if (lastMessageAtStr is String) {
+            final dt = DateTime.tryParse(lastMessageAtStr);
+            return dt?.toLocal();
+          }
+          return null;
+        })(),
+        unreadCount: _parseInt(json['unreadCount'] ?? json['unread_count'], 0),
+        createdAt: (() {
+          final createdAtStr = json['createdAt'] ?? json['created_at'];
+          if (createdAtStr == null) return DateTime.now();
+          if (createdAtStr is String) {
+            return DateTime.tryParse(createdAtStr)?.toLocal() ?? DateTime.now();
+          }
+          return DateTime.now();
+        })(),
+        updatedAt: (() {
+          final updatedAtStr = json['updatedAt'] ?? json['updated_at'];
+          if (updatedAtStr == null) return DateTime.now();
+          if (updatedAtStr is String) {
+            return DateTime.tryParse(updatedAtStr)?.toLocal() ?? DateTime.now();
+          }
+          return DateTime.now();
+        })(),
       );
-    } catch (e, stackTrace) {
+    } catch (e) {
+      print('Error in Chat.fromJson: $e');
+      print('JSON data: $json');
       rethrow;
     }
   }

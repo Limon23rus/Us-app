@@ -39,24 +39,28 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 80,
-              color: Theme.of(context).primaryColor,
+            Image.asset(
+              'lib/assets/logo.png',
+              width: 80,
+              height: 80,
             ),
             const SizedBox(height: 20),
             Text(
-              'Мессенджер',
+              'Us значит Усанов',
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
             ),
             const SizedBox(height: 20),
-            const CircularProgressIndicator(),
+            const CircularProgressIndicator(
+              color: Colors.white,
+            ),
           ],
         ),
       ),

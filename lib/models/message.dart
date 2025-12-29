@@ -53,8 +53,9 @@ class Message {
         // Формат с отдельными полями sender_id, sender_username, sender_avatar
         final senderId = json['sender_id'] ?? json['senderId'] ?? json['sender']?['id'] ?? 0;
         final senderUsername = json['sender_username'] ?? json['senderUsername'] ?? json['sender']?['username'] ?? 'Unknown';
-        final senderEmail = json['sender_email'] ?? json['senderEmail'] ?? json['sender']?['email'] ?? 'user@example.com';
-        final senderAvatar = json['sender_avatar'] ?? json['senderAvatar'] ?? json['sender']?['avatar'];
+        // sender_email может отсутствовать в ответе бэкенда, используем дефолтное значение
+        final senderEmail = json['sender_email'] ?? json['senderEmail'] ?? json['sender']?['email'] ?? 'user$senderId@example.com';
+        final senderAvatar = json['sender_avatar'] ?? json['senderAvatar'] ?? json['sender']?['avatar'] ?? json['sender']?['avatar_url'];
         
         sender = User(
           id: senderId as int,
@@ -81,13 +82,13 @@ class Message {
         fileName: fileName as String?,
         isRead: isRead as bool,
         createdAt: createdAtStr != null
-            ? (DateTime.tryParse(createdAtStr as String) ?? DateTime.now())
+            ? _parseDateTime(createdAtStr as String)
             : DateTime.now(),
         updatedAt: updatedAtStr != null
-            ? (DateTime.tryParse(updatedAtStr as String) ?? DateTime.now())
+            ? _parseDateTime(updatedAtStr as String)
             : DateTime.now(),
       );
-    } catch (e, stackTrace) {
+    } catch (e) {
       rethrow;
     }
   }
@@ -115,6 +116,46 @@ class Message {
       if (fileUrl != null) 'fileUrl': fileUrl,
       if (fileName != null) 'fileName': fileName,
     };
+  }
+
+  /// Парсит строку даты и конвертирует в локальное время
+  /// Бэкенд теперь всегда возвращает время в формате ISO 8601 с UTC (с 'Z' в конце)
+  static DateTime _parseDateTime(String dateTimeStr) {
+    try {
+      // Парсим дату
+      DateTime? dateTime = DateTime.tryParse(dateTimeStr);
+      
+      if (dateTime == null) {
+        return DateTime.now();
+      }
+      
+      // Если строка содержит 'Z' (UTC), DateTime.tryParse создает UTC DateTime
+      // Если строка содержит offset, DateTime.tryParse создает DateTime с этим offset
+      // Если часовой пояс не указан, DateTime.tryParse создает локальный DateTime
+      
+      // Проверяем, является ли DateTime UTC
+      if (dateTime.isUtc) {
+        // Это UTC, конвертируем в локальное время
+        return dateTime.toLocal();
+      } else {
+        // Это локальное время, но если строка не содержала часового пояса,
+        // предполагаем, что сервер вернул UTC время без указания часового пояса
+        // Создаем UTC DateTime из компонентов и конвертируем в локальное
+        final utcDateTime = DateTime.utc(
+          dateTime.year,
+          dateTime.month,
+          dateTime.day,
+          dateTime.hour,
+          dateTime.minute,
+          dateTime.second,
+          dateTime.millisecond,
+          dateTime.microsecond,
+        );
+        return utcDateTime.toLocal();
+      }
+    } catch (e) {
+      return DateTime.now();
+    }
   }
 }
 

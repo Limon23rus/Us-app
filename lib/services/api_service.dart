@@ -53,27 +53,47 @@ class ApiService {
   // Chats
   Future<List<Chat>> getChats() async {
     try {
+      final headers = getHeaders();
+      print('Get chats: ${AppConfig.chatsEndpoint}');
+      print('Headers: ${headers.containsKey('Authorization') ? 'Token present' : 'No token'}');
+      
       final response = await http.get(
         Uri.parse(AppConfig.chatsEndpoint),
-        headers: getHeaders(),
+        headers: headers,
       );
+
+      print('Get chats response: ${response.statusCode}');
+      print('Response body length: ${response.body.length}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List<dynamic>;
+        print('Parsed ${data.length} chats from response');
         
         final chats = data.map((json) {
           try {
             return Chat.fromJson(json as Map<String, dynamic>);
           } catch (e) {
+            print('Error parsing chat: $e');
+            print('Chat data: $json');
             return null;
           }
         }).whereType<Chat>().toList();
         
+        print('Successfully parsed ${chats.length} chats');
         return chats;
+      } else if (response.statusCode == 401) {
+        print('Unauthorized - token may be invalid');
+        throw Exception('Не авторизован. Пожалуйста, войдите снова.');
+      } else if (response.statusCode == 403) {
+        print('Forbidden');
+        throw Exception('Доступ запрещен');
+      } else {
+        print('Get chats error: ${response.statusCode} - ${response.body}');
+        throw Exception('Ошибка загрузки чатов: ${response.statusCode}');
       }
-      return [];
     } catch (e) {
-      return [];
+      print('Get chats exception: $e');
+      rethrow;
     }
   }
 
@@ -116,7 +136,7 @@ class ApiService {
         try {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           return Chat.fromJson(data);
-        } catch (e, stackTrace) {
+        } catch (e) {
           return null;
         }
       } else {
@@ -135,7 +155,7 @@ class ApiService {
           return null;
         }
       }
-    } catch (e, stackTrace) {
+    } catch (e) {
       return null;
     }
   }
@@ -158,10 +178,10 @@ class ApiService {
   Future<List<Message>> getMessages(int chatId, {int? limit, int? offset}) async {
     try {
       String url = '${AppConfig.messagesEndpoint}/chat/$chatId';
-      if (limit != null || offset != null) {
-        final params = <String>[];
-        if (limit != null) params.add('limit=$limit');
-        if (offset != null) params.add('offset=$offset');
+      final params = <String>[];
+      if (limit != null) params.add('limit=$limit');
+      if (offset != null) params.add('offset=$offset');
+      if (params.isNotEmpty) {
         url += '?${params.join('&')}';
       }
 
@@ -172,11 +192,24 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List<dynamic>;
-        return data.map((json) => Message.fromJson(json as Map<String, dynamic>)).toList();
+        return data.map((json) {
+          try {
+            return Message.fromJson(json as Map<String, dynamic>);
+          } catch (e) {
+            // Логируем ошибку парсинга, но продолжаем обработку других сообщений
+            return null;
+          }
+        }).whereType<Message>().toList();
+      } else if (response.statusCode == 403) {
+        throw Exception('Доступ запрещен к этому чату');
+      } else if (response.statusCode == 404) {
+        throw Exception('Чат не найден');
+      } else {
+        throw Exception('Ошибка загрузки сообщений: ${response.statusCode}');
       }
-      return [];
     } catch (e) {
-      return [];
+      // Пробрасываем исключение дальше для обработки в провайдере
+      rethrow;
     }
   }
 
@@ -223,6 +256,32 @@ class ApiService {
     }
   }
 
+  // Profile
+  Future<User?> updateProfile({
+    String? username,
+    String? avatarUrl,
+  }) async {
+    try {
+      final requestBody = <String, dynamic>{};
+      if (username != null) requestBody['username'] = username;
+      if (avatarUrl != null) requestBody['avatarUrl'] = avatarUrl;
+
+      final response = await http.patch(
+        Uri.parse(AppConfig.usersMeEndpoint),
+        headers: getHeaders(),
+        body: jsonEncode(requestBody),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return User.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // Upload
   Future<String?> uploadFile(String filePath, String fileName) async {
     try {
@@ -231,7 +290,13 @@ class ApiService {
         Uri.parse(AppConfig.uploadEndpoint),
       );
       
-      request.headers.addAll(getHeaders());
+      // Для multipart запросов добавляем только заголовки авторизации
+      // Content-Type будет установлен автоматически с boundary
+      final authHeaders = getHeaders();
+      // Убираем Content-Type, если он есть, так как для multipart он устанавливается автоматически
+      authHeaders.remove('Content-Type');
+      request.headers.addAll(authHeaders);
+      
       request.files.add(await http.MultipartFile.fromPath('file', filePath));
 
       final streamedResponse = await request.send();
@@ -239,10 +304,26 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        return data['url'] as String?;
+        // Бэкенд возвращает fileUrl в формате /uploads/filename
+        final fileUrl = data['fileUrl'] as String?;
+        if (fileUrl != null) {
+          // Если URL относительный, добавляем baseUrl
+          if (fileUrl.startsWith('/')) {
+            return '${AppConfig.baseUrl}$fileUrl';
+          }
+          return fileUrl;
+        }
+        print('Upload response missing fileUrl: $data');
+        return null;
+      } else {
+        // Логируем ошибку для отладки
+        print('Upload error: ${response.statusCode} - ${response.body}');
+        return null;
       }
-      return null;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // Логируем ошибку для отладки
+      print('Upload exception: $e');
+      print('Stack trace: $stackTrace');
       return null;
     }
   }

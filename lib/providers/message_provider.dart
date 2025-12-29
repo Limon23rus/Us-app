@@ -1,18 +1,20 @@
 import 'package:flutter/foundation.dart';
 import '../models/message.dart';
-import '../models/user.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
+import '../services/message_cache_service.dart';
 
 class MessageProvider extends ChangeNotifier {
   final AuthProvider authProvider;
   ChatProvider? _chatProvider;
+  final MessageCacheService _cacheService = MessageCacheService();
   
   final Map<int, List<Message>> _messages = {};
   final Map<int, bool> _isTyping = {};
   final Map<int, bool> _isLoading = {};
   final Map<int, bool> _hasMore = {};
   final Map<int, int> _page = {};
+  final Map<int, DateTime?> _oldestMessageTime = {}; // Время самого старого сообщения для пагинации
 
   MessageProvider({required this.authProvider}) {
     _setupSocketListeners();
@@ -63,7 +65,7 @@ class MessageProvider extends ChangeNotifier {
         if (authProvider.user != null && message.sender.id != authProvider.user!.id) {
           _chatProvider?.incrementUnreadCount(message.chatId);
         }
-      } catch (e, stackTrace) {
+      } catch (e) {
         // Ошибка обработки сообщения
       }
     });
@@ -100,7 +102,23 @@ class MessageProvider extends ChangeNotifier {
     if (refresh) {
       _page[chatId] = 0;
       _hasMore[chatId] = true;
-      _messages[chatId] = []; // Очищаем сообщения при обновлении
+      _oldestMessageTime[chatId] = null;
+      
+      // При первой загрузке сначала загружаем из кэша
+      try {
+        final cachedMessages = await _cacheService.getLastCachedMessages(chatId, 1000);
+        if (cachedMessages.isNotEmpty) {
+          _messages[chatId] = cachedMessages;
+          notifyListeners();
+          
+          // Устанавливаем время самого старого сообщения для пагинации
+          if (cachedMessages.isNotEmpty) {
+            _oldestMessageTime[chatId] = cachedMessages.first.createdAt;
+          }
+        }
+      } catch (e) {
+        // Ошибка загрузки из кэша, продолжаем
+      }
     }
 
     if (!hasMore(chatId) && !refresh) return;
@@ -109,9 +127,24 @@ class MessageProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final page = _page[chatId] ?? 0;
-      final limit = 1000;
-      final offset = page * limit;
+      int limit;
+      int offset;
+      
+      if (refresh) {
+        // При первой загрузке загружаем последние 1000 сообщений
+        // Бэкенд возвращает сообщения от старых к новым после reverse()
+        // offset=0 вернет первые 1000 сообщений (самые старые)
+        // Для получения последних нужно использовать большой offset или другой подход
+        // Пока используем offset=0 и limit=1000 для получения первых 1000
+        limit = 1000;
+        offset = 0;
+      } else {
+        // При подгрузке старых сообщений загружаем по 50 за раз
+        limit = 50;
+        // Увеличиваем offset для загрузки более старых сообщений
+        final currentPage = _page[chatId] ?? 0;
+        offset = currentPage * limit;
+      }
 
       final messages = await authProvider.apiService!.getMessages(
         chatId,
@@ -119,23 +152,62 @@ class MessageProvider extends ChangeNotifier {
         offset: offset,
       );
 
+      if (messages.isEmpty) {
+        _hasMore[chatId] = false;
+        _isLoading[chatId] = false;
+        notifyListeners();
+        return;
+      }
+
       if (refresh) {
-        // При первой загрузке: загружаем последние 1000 сообщений
-        _messages[chatId] = messages.reversed.toList();
+        // При первой загрузке: бэкенд уже возвращает сообщения от старых к новым
+        // Объединяем с кэшированными сообщениями, если они есть
+        final existing = _messages[chatId] ?? [];
+        final existingIds = existing.map((m) => m.id).toSet();
+        final newMessages = messages.where((m) => !existingIds.contains(m.id)).toList();
+        
+        // Объединяем все сообщения и сортируем по времени
+        final allMessages = [...existing, ...newMessages];
+        allMessages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        
+        if (newMessages.isNotEmpty || existing.isNotEmpty) {
+          _messages[chatId] = allMessages;
+          
+          // Сохраняем новые сообщения в кэш
+          if (newMessages.isNotEmpty) {
+            await _cacheService.saveMessages(chatId, newMessages);
+          }
+        }
+        
+        // Устанавливаем время самого старого сообщения для пагинации
+        if (allMessages.isNotEmpty) {
+          _oldestMessageTime[chatId] = allMessages.first.createdAt;
+        }
       } else {
         // При подгрузке старых сообщений: добавляем в начало списка
         final existing = _messages[chatId] ?? [];
         final existingIds = existing.map((m) => m.id).toSet();
-        final newMessages = messages.reversed.where((m) => !existingIds.contains(m.id)).toList();
-        // Старые сообщения добавляем в начало
-        _messages[chatId] = [...newMessages, ...existing];
+        // API возвращает от старых к новым, поэтому не переворачиваем
+        final newMessages = messages.where((m) => !existingIds.contains(m.id)).toList();
+        
+        if (newMessages.isNotEmpty) {
+          // Старые сообщения добавляем в начало
+          _messages[chatId] = [...newMessages, ...existing];
+          
+          // Сохраняем новые сообщения в кэш
+          await _cacheService.saveMessages(chatId, newMessages);
+          
+          // Обновляем время самого старого сообщения
+          _oldestMessageTime[chatId] = newMessages.first.createdAt;
+        }
       }
 
       // Если получили меньше сообщений, чем запросили, значит больше нет
       _hasMore[chatId] = messages.length == limit;
-      _page[chatId] = (page + 1);
+      _page[chatId] = (_page[chatId] ?? 0) + 1;
     } catch (e) {
-      // Handle error
+      // Обрабатываем ошибки
+      _hasMore[chatId] = false;
     }
 
     _isLoading[chatId] = false;
@@ -179,7 +251,7 @@ class MessageProvider extends ChangeNotifier {
     }
   }
 
-  void _addMessage(int chatId, Message message) {
+  void _addMessage(int chatId, Message message) async {
     if (_messages[chatId] == null) {
       _messages[chatId] = [];
     }
@@ -202,20 +274,36 @@ class MessageProvider extends ChangeNotifier {
       
       // Сообщения нет, добавляем
       _messages[chatId]!.add(message);
+      
+      // Сохраняем в кэш
+      try {
+        await _cacheService.addMessage(message);
+      } catch (e) {
+        // Ошибка сохранения в кэш, игнорируем
+      }
+      
       notifyListeners();
     } else {
       // Сообщение уже есть, обновляем его (на случай если пришла обновленная версия)
       _messages[chatId]![existingIndex] = message;
+      
+      // Обновляем в кэше
+      try {
+        await _cacheService.updateMessage(message);
+      } catch (e) {
+        // Ошибка обновления в кэше, игнорируем
+      }
+      
       notifyListeners();
     }
   }
 
-  void _markMessagesAsRead(int chatId, List<int> messageIds) {
+  void _markMessagesAsRead(int chatId, List<int> messageIds) async {
     if (_messages[chatId] == null) return;
 
     for (var i = 0; i < _messages[chatId]!.length; i++) {
       if (messageIds.contains(_messages[chatId]![i].id)) {
-        _messages[chatId]![i] = Message(
+        final updatedMessage = Message(
           id: _messages[chatId]![i].id,
           chatId: _messages[chatId]![i].chatId,
           sender: _messages[chatId]![i].sender,
@@ -227,6 +315,14 @@ class MessageProvider extends ChangeNotifier {
           createdAt: _messages[chatId]![i].createdAt,
           updatedAt: _messages[chatId]![i].updatedAt,
         );
+        _messages[chatId]![i] = updatedMessage;
+        
+        // Обновляем в кэше
+        try {
+          await _cacheService.updateMessage(updatedMessage);
+        } catch (e) {
+          // Ошибка обновления в кэше, игнорируем
+        }
       }
     }
     notifyListeners();
@@ -256,6 +352,16 @@ class MessageProvider extends ChangeNotifier {
     _isLoading.remove(chatId);
     _hasMore.remove(chatId);
     _page.remove(chatId);
+    _oldestMessageTime.remove(chatId);
     notifyListeners();
+  }
+  
+  /// Очищает кэш для указанного чата
+  Future<void> clearCache(int chatId) async {
+    try {
+      await _cacheService.clearCacheForChat(chatId);
+    } catch (e) {
+      // Ошибка очистки кэша, игнорируем
+    }
   }
 }

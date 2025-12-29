@@ -6,6 +6,7 @@ import '../../models/user.dart';
 import '../../models/chat.dart';
 import '../../services/api_service.dart';
 import '../chats/chat_screen.dart';
+import 'create_group_screen.dart';
 
 class SearchUsersScreen extends StatefulWidget {
   const SearchUsersScreen({super.key});
@@ -123,8 +124,32 @@ class _SearchUsersScreenState extends State<SearchUsersScreen> {
       ),
       body: Column(
         children: [
+          // Кнопка создания группы
           Padding(
             padding: const EdgeInsets.all(16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const CreateGroupScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.group_add),
+                label: const Text('Создать группу'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(

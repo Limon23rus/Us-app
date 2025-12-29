@@ -33,14 +33,20 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<void> loadChats() async {
-    if (authProvider.apiService == null) return;
+    if (authProvider.apiService == null) {
+      _error = 'API сервис недоступен';
+      _isLoading = false;
+      notifyListeners();
+      return;
+    }
 
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _chats = await authProvider.apiService!.getChats();
+      final chats = await authProvider.apiService!.getChats();
+      _chats = chats;
       _chats.sort((a, b) {
         final aTime = a.lastMessageAt ?? a.updatedAt;
         final bTime = b.lastMessageAt ?? b.updatedAt;
@@ -48,6 +54,8 @@ class ChatProvider extends ChangeNotifier {
       });
     } catch (e) {
       _error = 'Ошибка загрузки чатов: $e';
+      print('ChatProvider loadChats error: $e');
+      _chats = []; // Очищаем список при ошибке
     }
 
     _isLoading = false;
@@ -81,7 +89,7 @@ class ChatProvider extends ChangeNotifier {
       }
 
       return chat;
-    } catch (e, stackTrace) {
+    } catch (e) {
       _lastError = 'Ошибка создания чата: ${e.toString()}';
       return null;
     }

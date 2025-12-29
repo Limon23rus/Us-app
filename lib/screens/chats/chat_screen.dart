@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/message_provider.dart';
-import '../../providers/chat_provider.dart';
 import '../../models/chat.dart';
-import '../../models/message.dart';
-import '../../models/user.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/typing_indicator.dart';
 
@@ -22,7 +20,9 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+  final _imagePicker = ImagePicker();
   bool _isTyping = false;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -128,6 +128,137 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     _scrollToBottom();
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+
+      if (image != null) {
+        await _sendMedia(image.path, 'image', image.name);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка выбора изображения: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickVideo(ImageSource source) async {
+    try {
+      final XFile? video = await _imagePicker.pickVideo(
+        source: source,
+        maxDuration: const Duration(minutes: 10),
+      );
+
+      if (video != null) {
+        await _sendMedia(video.path, 'video', video.name);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка выбора видео: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendMedia(String filePath, String messageType, String fileName) async {
+    if (_isUploading) return;
+
+    setState(() {
+      _isUploading = true;
+    });
+
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final messageProvider = Provider.of<MessageProvider>(context, listen: false);
+
+      if (authProvider.apiService == null) {
+        throw Exception('API сервис недоступен');
+      }
+
+      // Загружаем файл на сервер
+      final fileUrl = await authProvider.apiService!.uploadFile(filePath, fileName);
+      
+      if (fileUrl == null) {
+        throw Exception('Ошибка загрузки файла');
+      }
+
+      // Отправляем сообщение с медиа
+      await messageProvider.sendMessage(
+        chatId: widget.chat.id,
+        content: messageType == 'image' ? 'Фото' : 'Видео',
+        messageType: messageType,
+        fileUrl: fileUrl,
+        fileName: fileName,
+      );
+
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка отправки: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
+  }
+
+  void _showMediaPicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Выбрать фото из галереи'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Сделать фото'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library),
+              title: const Text('Выбрать видео из галереи'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam),
+              title: const Text('Записать видео'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _markAsRead() async {
@@ -277,6 +408,17 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             child: Row(
               children: [
+                IconButton(
+                  icon: _isUploading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.attach_file),
+                  onPressed: _isUploading ? null : _showMediaPicker,
+                  color: Theme.of(context).primaryColor,
+                ),
                 Expanded(
                   child: TextField(
                     controller: _messageController,

@@ -8,6 +8,7 @@ import '../../models/chat.dart';
 import '../../models/user.dart';
 import 'chat_screen.dart';
 import '../search/search_users_screen.dart';
+import '../profile/profile_screen.dart';
 
 class ChatsListScreen extends StatefulWidget {
   const ChatsListScreen({super.key});
@@ -33,7 +34,21 @@ class _ChatsListScreenState extends State<ChatsListScreen> {
   }
 
   Future<void> _loadChats() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+    
+    // Проверяем, что пользователь авторизован
+    if (!authProvider.isAuthenticated || authProvider.user == null) {
+      print('User not authenticated, cannot load chats');
+      return;
+    }
+    
+    // Проверяем, что API сервис доступен
+    if (authProvider.apiService == null) {
+      print('API service not available');
+      return;
+    }
+    
     await chatProvider.loadChats();
   }
 
@@ -48,7 +63,10 @@ class _ChatsListScreenState extends State<ChatsListScreen> {
     } else if (difference.inDays == 1) {
       return 'Вчера';
     } else if (difference.inDays < 7) {
-      return DateFormat('EEEE', 'ru').format(dateTime);
+      // Используем номер дня недели вместо локализованного названия
+      final weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+      final weekdayIndex = dateTime.weekday - 1;
+      return weekdays[weekdayIndex];
     } else {
       return DateFormat('dd.MM.yyyy').format(dateTime);
     }
@@ -78,7 +96,11 @@ class _ChatsListScreenState extends State<ChatsListScreen> {
               PopupMenuItem(
                 child: const Text('Профиль'),
                 onTap: () {
-                  // TODO: Navigate to profile
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ProfileScreen(),
+                    ),
+                  );
                 },
               ),
               PopupMenuItem(
@@ -98,6 +120,44 @@ class _ChatsListScreenState extends State<ChatsListScreen> {
         onRefresh: _loadChats,
         child: chatProvider.isLoading && chatProvider.chats.isEmpty
             ? const Center(child: CircularProgressIndicator())
+            : chatProvider.error != null && chatProvider.chats.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 64,
+                          color: Colors.red[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Ошибка загрузки',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Text(
+                            chatProvider.error!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _loadChats,
+                          child: const Text('Повторить'),
+                        ),
+                      ],
+                    ),
+                  )
             : chatProvider.chats.isEmpty
                 ? Center(
                     child: Column(
@@ -182,6 +242,7 @@ class ChatListItem extends StatelessWidget {
     final displayName = chat.getDisplayName(currentUser);
     final displayAvatar = chat.getDisplayAvatar(currentUser);
     final lastMessageTime = formatTime(chat.lastMessageAt);
+    final isGroup = chat.type == ChatType.group;
 
     return ListTile(
       leading: CircleAvatar(
@@ -192,9 +253,21 @@ class ChatListItem extends StatelessWidget {
             ? Text(displayName[0].toUpperCase())
             : null,
       ),
-      title: Text(
-        displayName,
-        style: const TextStyle(fontWeight: FontWeight.w500),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              displayName,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+          ),
+          if (isGroup)
+            Icon(
+              Icons.group,
+              size: 16,
+              color: Colors.grey[600],
+            ),
+        ],
       ),
       subtitle: Text(
         chat.lastMessage ?? 'Нет сообщений',

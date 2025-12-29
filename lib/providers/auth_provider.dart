@@ -121,7 +121,44 @@ class AuthProvider extends ChangeNotifier {
     final user = await authService.getCurrentUserFromServer();
     if (user != null) {
       _user = user;
+      await authService.saveUser(user);
       notifyListeners();
+    }
+  }
+
+  Future<bool> updateProfile({
+    String? username,
+    String? avatarUrl,
+  }) async {
+    if (_apiService == null) return false;
+
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final updatedUser = await _apiService!.updateProfile(
+        username: username,
+        avatarUrl: avatarUrl,
+      );
+
+      if (updatedUser != null) {
+        _user = updatedUser;
+        await authService.saveUser(updatedUser);
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _error = 'Не удалось обновить профиль';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _error = 'Ошибка обновления профиля: ${e.toString()}';
+      _isLoading = false;
+      notifyListeners();
+      return false;
     }
   }
 }
